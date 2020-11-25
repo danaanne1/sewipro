@@ -23,14 +23,16 @@ public final class Types {
 	public static final byte SHORT = 0x09;
 	public static final byte STRING = 0x10;
 	public static final byte OBJECT = 0x11;
+	public static final byte NULL = 0x12;
 	
+	public static final ByteBuffer NULL_BUFFER = ByteBuffer.allocate(1).put(NULL);
 	
 	private static final Map<Class<?>,Function<Object, ByteBuffer>> _writers = new HashMap<>();
 	private static final Map<Byte,Function<ByteBuffer, Object>> _readers = new HashMap<>();
 	
 	static {
 		_writers.put(Struct.class, v->((Struct)v).toByteBuffer());
-		// _writers.put(Array.class, v->((Array)v).toByteBuffer());
+		_writers.put(Array.class, v->((Array)v).toByteBuffer());
 		_writers.put(Byte.class, v->ByteBuffer.allocate(2).put(BYTE).put((Byte)v).rewind());
 		_writers.put(Character.class, v->ByteBuffer.allocate(3).put(CHAR).putChar((Character)v).rewind());
 		_writers.put(Double.class, v->ByteBuffer.allocate(9).put(DOUBLE).putDouble((Double)v).rewind());
@@ -53,7 +55,7 @@ public final class Types {
 		_writers.put(Object.class, Types::writeSerializedObjectToBuffer);
 		
 		_readers.put(STRUCT, b->new Struct(b));
-		// _readers.put(ARRAY, b->new Array(b));
+		_readers.put(ARRAY, b->new Array(b));
 		_readers.put(BYTE, b->b.get(1));
 		_readers.put(CHAR, b->b.getChar(1));
 		_readers.put(DOUBLE, b->b.getDouble(1));
@@ -63,6 +65,7 @@ public final class Types {
 		_readers.put(SHORT, b->b.getShort(1));
 		_readers.put(STRING, b->b.position(1).asCharBuffer().toString());
 		_readers.put(OBJECT, Types::readSerializedObjectFromBuffer);
+		_readers.put(NULL, b->null);
 	}
 
 	private static final Object readSerializedObjectFromBuffer(ByteBuffer buffer) {
@@ -88,6 +91,8 @@ public final class Types {
 	}
 
 	public final static ByteBuffer toByteBuffer(Object obj) {
+		if (obj==null)
+			return NULL_BUFFER;
 		if (_writers.containsKey(obj.getClass())) {
 			return _writers.get(obj.getClass()).apply(obj);
 		}
@@ -97,6 +102,5 @@ public final class Types {
 	public final static Object fromByteBuffer(ByteBuffer buf) {
 		return _readers.get(buf.get(0)).apply(buf);
 	}
-	
-	
+
 }

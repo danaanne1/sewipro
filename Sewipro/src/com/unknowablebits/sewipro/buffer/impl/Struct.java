@@ -2,9 +2,9 @@ package com.unknowablebits.sewipro.buffer.impl;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Basic implementation of a struct for a lazy loading, convert on write, in memory serialization mechanism.
@@ -12,42 +12,34 @@ import java.util.Set;
  * @author Dana
  */
 public class Struct {
-	
-	
 	ByteBuffer backingBuffer;
-	HashMap<String,Object> materializedRecords;
-	HashMap<String,ByteBuffer> recordBuffers;
-	HashMap<String,Object> newrecords;
+	HashMap<String,Record> records;
 
 	public Struct(ByteBuffer buffer) {
 		this.backingBuffer = buffer;
 	}
+
 	public Struct() {
 		this(ByteBuffer.allocate(5).put(Types.STRUCT).putInt(0));
 	}
 	
 	public Object put(String key, Object value) {
-		if (newrecords == null) {
-			newrecords = new HashMap<>();
-		}
-		Object result = get(key);
-		newrecords.put(key, value);
-		return result;
+		materialize();
+		Object oldValue = get(key);
+		records.put(key, new Record().withValue(value));
+		return oldValue;
 	}
 	
 	public Set<String> keySet() {
 		materialize();
-		HashSet<String> result = new HashSet<String>(recordBuffers.keySet());
-		if (newrecords!=null) result.addAll(newrecords.keySet());
-		return result;
+		return records.keySet();
 	}
 	
 	private void materialize() {
-		if (recordBuffers!=null) return;
-
-		recordBuffers = new HashMap<>();
-		materializedRecords = new HashMap<>();
-
+		if (records!=null) return;
+		
+		records = new HashMap<>();
+		
 		// read all of the keys
 		String [] keys = new String[backingBuffer.position(1).getInt()];
 		for (int i = 0; i < keys.length; i++) {
@@ -64,41 +56,31 @@ public class Struct {
 
 		// build the map
 		for (int i = 0; i < keys.length; i++) {
-			recordBuffers.put(keys[i], backingBuffer.slice().limit(sizes[i]));
+			records.put(keys[i], new Record(backingBuffer.slice().limit(sizes[i])));
 			backingBuffer.position(backingBuffer.position()+sizes[i]);
 		}
 		
 	}
 
 	public Object get(String key) {
-		if (newrecords!=null && newrecords.containsKey(key)) {
-			return newrecords.get(key);
-		}
 		materialize();
-		if (materializedRecords.containsKey(key)) {
-			return materializedRecords.get(key);
-		}
-		ByteBuffer buffer = recordBuffers.get(key);
-		if (buffer == null)
-			return null;
-		Object obj = Types.fromByteBuffer(buffer);
-		materializedRecords.put(key,obj);
-		return obj;
+		Record r = records.get(key);
+		if (r==null)
+			return r;
+		return r.value();
 	}
 	
 
 	public ByteBuffer toByteBuffer() {
-		if (newrecords==null)
+		if (records==null)
 			return backingBuffer.rewind();
-		LinkedHashMap<String, ByteBuffer> recordsOut = new LinkedHashMap<>(recordBuffers);
-		for (String key: newrecords.keySet()) {
-			Object obj = newrecords.get(key);
-			if (obj==null)
-				recordsOut.remove(key);
-			else
-				recordsOut.put(key, Types.toByteBuffer(obj));
-		}
-
+		LinkedHashMap<String, ByteBuffer> recordsOut =
+				records
+				.entrySet()
+				.stream()
+				.filter(e->!e.getValue().isNull())
+				.collect(Collectors.toMap(e->e.getKey(),e->e.getValue().toByteBuffer(),(e1,e2)->e2,LinkedHashMap::new));
+		
 		// calculate size
 		ByteBuffer result = ByteBuffer.allocate(
 				1 // struct type
